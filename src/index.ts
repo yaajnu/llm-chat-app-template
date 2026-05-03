@@ -1,21 +1,21 @@
 /**
- * LLM Chat Application Template
+ * Image Generation Application Template
  *
- * A simple chat application using Cloudflare Workers AI.
- * This template demonstrates how to implement an LLM-powered chat interface with
- * streaming responses using Server-Sent Events (SSE).
+ * An image generation application using Cloudflare Workers AI.
+ * This template demonstrates how to implement an AI-powered image generation
+ * interface using the Stable Diffusion XL Lightning model.
  *
  * @license MIT
  */
-import { Env, ChatMessage } from "./types";
+import { Env } from "./types";
 
-// Model ID for Workers AI model
+// Model ID for Workers AI image generation model
 // https://developers.cloudflare.com/workers-ai/models/
-const MODEL_ID = "@cf/meta/llama-3.1-8b-instruct-fp8";
+const MODEL_ID = "@cf/bytedance/stable-diffusion-xl-lightning";
 
-// Default system prompt
+// Default system prompt shown to users as a hint
 const SYSTEM_PROMPT =
-	"You are a helpful, friendly assistant. Provide concise and accurate responses.";
+	"Describe the image you want to generate. Be specific about subjects, style, colors, lighting, and composition for best results.";
 
 export default {
 	/**
@@ -34,14 +34,21 @@ export default {
 		}
 
 		// API Routes
-		if (url.pathname === "/api/chat") {
-			// Handle POST requests for chat
+		if (url.pathname === "/api/generate") {
+			// Handle POST requests for image generation
 			if (request.method === "POST") {
-				return handleChatRequest(request, env);
+				return handleGenerateRequest(request, env);
 			}
 
 			// Method not allowed for other request types
 			return new Response("Method not allowed", { status: 405 });
+		}
+
+		// Return the system prompt hint so the frontend can display it
+		if (url.pathname === "/api/prompt-hint") {
+			return new Response(JSON.stringify({ hint: SYSTEM_PROMPT }), {
+				headers: { "content-type": "application/json" },
+			});
 		}
 
 		// Handle 404 for unmatched routes
@@ -50,30 +57,29 @@ export default {
 } satisfies ExportedHandler<Env>;
 
 /**
- * Handles chat API requests
+ * Handles image generation API requests
  */
-async function handleChatRequest(
+async function handleGenerateRequest(
 	request: Request,
 	env: Env,
 ): Promise<Response> {
 	try {
 		// Parse JSON request body
-		const { messages = [] } = (await request.json()) as {
-			messages: ChatMessage[];
-		};
+		const { prompt } = (await request.json()) as { prompt: string };
 
-		// Add system prompt if not present
-		if (!messages.some((msg) => msg.role === "system")) {
-			messages.unshift({ role: "system", content: SYSTEM_PROMPT });
+		if (!prompt || prompt.trim() === "") {
+			return new Response(
+				JSON.stringify({ error: "A prompt is required" }),
+				{
+					status: 400,
+					headers: { "content-type": "application/json" },
+				},
+			);
 		}
 
-		const stream = await env.AI.run(
+		const imageResponse = await env.AI.run(
 			MODEL_ID,
-			{
-				messages,
-				max_tokens: 1024,
-				stream: true,
-			},
+			{ prompt: prompt.trim() },
 			{
 				// Uncomment to use AI Gateway
 				// gateway: {
@@ -84,17 +90,17 @@ async function handleChatRequest(
 			},
 		);
 
-		return new Response(stream, {
+		// The model returns a ReadableStream of the PNG image bytes
+		return new Response(imageResponse, {
 			headers: {
-				"content-type": "text/event-stream; charset=utf-8",
+				"content-type": "image/png",
 				"cache-control": "no-cache",
-				connection: "keep-alive",
 			},
 		});
 	} catch (error) {
-		console.error("Error processing chat request:", error);
+		console.error("Error processing image generation request:", error);
 		return new Response(
-			JSON.stringify({ error: "Failed to process request" }),
+			JSON.stringify({ error: "Failed to generate image" }),
 			{
 				status: 500,
 				headers: { "content-type": "application/json" },
